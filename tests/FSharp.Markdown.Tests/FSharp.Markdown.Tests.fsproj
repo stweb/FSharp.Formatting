@@ -71,6 +71,7 @@
     </Compile>
     <Compile Include="TestFiles.fs" />
     <Compile Include="Markdown.fs" />
+    <Compile Include="WikiMarkup.fs" />
     <Compile Include="Externals.fs" />
     <Compile Include="CommonMarkSpecTest.fs" />
     <None Include="App.config">
