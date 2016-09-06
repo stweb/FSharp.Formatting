@@ -293,6 +293,59 @@ let rec (|ListItems|_|) prevSimple = function
       | _ -> Some([indent, info], rest)
   | _ -> None
 
+// Code for parsing pipe tables
+
+// Splits table row into deliminated parts escaping inline code 
+let rec pipeTableFindSplits (delim : char array) (line : char list) = 
+    
+    let rec ptfs delim line = 
+        match line with
+        | List.DelimitedWith [ '`'; ' ' ] [ ' '; '`' ] (body, rest) -> ptfs delim rest
+        | List.DelimitedNTimes '`' (body, rest) -> ptfs delim rest
+        | x :: rest when Array.exists ((=) x) delim -> Some rest
+        | '\\' :: _ :: rest | _ :: rest -> ptfs delim rest
+        | [] -> None
+    
+    let rest = ptfs delim line
+    match rest with
+    | None -> [ toString line ]
+    | Some x when line = [] -> [ "" ]
+    | Some x -> 
+        let chunkSize = List.length line - List.length x - 1
+        toString (Seq.take chunkSize line |> Seq.toList) :: pipeTableFindSplits delim x      
+
+/// Recognizes row of pipe table.
+/// The function takes number of expected columns and array of delimiters.
+/// Returns list of strings between delimiters.
+let (|PipeTableRow|_|) (size : option<int>) delimiters (line : string) = 
+
+    let parts = if size.IsNone then line.Split([|"||"|], StringSplitOptions.None)
+                else line.Split([|"|"|], StringSplitOptions.None)
+                |> Array.map (fun s -> s.Trim())
+    
+    let n = parts.Length   
+    let m = if size.IsNone then 1 else size.Value    
+    let x = if String.IsNullOrEmpty parts.[0] && n > m then 1 else 0   
+    let y = if String.IsNullOrEmpty parts.[n - 1] && n - x > m then n - 2 else n - 1
+   
+    if n = 1 || (size.IsSome && y - x + 1 <> m) then None 
+    else Some(parts.[x..y] |> Array.toList)
+
+/// Recognizes pipe table
+let (|PipeTableBlock|_|) input =
+  let rec getTableRows size acc = function
+    | (PipeTableRow size [|'|'|] columns) :: rest ->
+        getTableRows size (List.map (fun l -> [l]) columns :: acc) rest
+    | rest -> (List.rev acc, rest)
+
+  match input with
+  | (PipeTableRow None [|'|'|] headers) :: rest ->
+        let rows, others = getTableRows (Some headers.Length) [] rest
+        let header_paragraphs = headers |> List.map (fun l -> [l])
+        Some((Some(header_paragraphs), rows), others)
+  | _ -> None
+
+
 /// Defines a context for the main `parseParagraphs` function
 type ParsingContext =
   { Links : Dictionary<string, string * option<string>>
@@ -301,6 +354,14 @@ type ParsingContext =
 /// Parse a list of lines into a sequence of markdown paragraphs
 let rec parseParagraphsWiki (ctx:ParsingContext) (lines: string list) = seq {
   match lines with    
+  | PipeTableBlock((headers, rows), Lines.TrimBlankStart rest) ->
+      let headParagraphs =
+        if headers.IsNone then None
+        else Some(headers.Value |> List.map (fun i -> parseParagraphsWiki ctx i |> List.ofSeq))
+      let aligns = headers.Value |> List.map (fun i -> AlignLeft )
+      yield TableBlock(headParagraphs, aligns, rows |> List.map (List.map (fun i -> parseParagraphsWiki ctx i |> List.ofSeq)))
+      yield! parseParagraphsWiki ctx rest
+
   | HorizontalRule(c) :: (Lines.TrimBlankStart lines) ->
       yield HorizontalRule(c)
       yield! parseParagraphsWiki ctx lines
