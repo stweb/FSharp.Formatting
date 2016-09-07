@@ -20,14 +20,20 @@ let inline toString chars = System.String(chars |> Array.ofList)
 /// character - in that case, returns the character and the tail of the list
 let inline (|EscapedChar|_|) input =
   match input with
-  | '\\'::( ( '*' | '\\' | '`' | '_' | '{' | '}' | '[' | ']'
+  | '\\':: '\\' ::rest -> Some('\n', rest)
+  | '\\'::( ( '*' | '`' | '_' | '{' | '}' | '[' | ']'
             | '(' | ')' | '>' | '#' | '.' | '!' | '+' | '-' | '$') as c) ::rest -> Some(c, rest)
   | _ -> None
 
-/// Escape dollar inside a LaTex inline math span.
-let inline (|EscapedLatexInlineMathChar|_|) input =
-  match input with
-  | '\\'::( ('$') as c) :: rest -> Some(c, rest)
+/// Recognize a link
+let (|WikiLink|_|) = function
+  | List.BracketDelimited '[' ']' (inside, rest) -> 
+        let text = toString inside
+        let arr = text.Split '|'
+        if arr.Length = 1 then
+            Some(text, text, rest) 
+        else
+            Some(arr.[0], arr.[1], rest)
   | _ -> None
 
 /// Matches a list if it starts with a sub-list that is delimited
@@ -78,14 +84,19 @@ let rec parseChars acc input = seq {
       yield! parseChars [] rest
 
   // Encode & as an HTML entity
-  | '&'::'a'::'m'::'p'::';'::rest
-  | '&'::rest ->
-      yield! parseChars (';'::'p'::'m'::'a'::'&'::acc) rest
-(*
+//  | '&'::'a'::'m'::'p'::';'::rest
+//  | '&'::rest ->
+//      yield! parseChars (';'::'p'::'m'::'a'::'&'::acc) rest
 
   // Ignore escaped characters that might mean something else
   | EscapedChar(c, rest) ->
       yield! parseChars (c::acc) rest
+
+  | WikiLink (link, body, rest) ->
+      yield! accLiterals.Value
+      yield DirectLink([ Literal(body) ], (link, None))
+      yield! parseChars [] rest
+(*
 
   // Inline code delimited either using double `` or single `
   // (if there are spaces around, then body can contain more backticks)
@@ -96,11 +107,7 @@ let rec parseChars acc input = seq {
       yield! parseChars [] rest
 
   // Recognize direct link [foo](http://bar) or indirect link [foo][bar] or auto link http://bar
-  | DirectLink (body, link, rest) ->
-      yield! accLiterals.Value
-      let info = getLinkAndTitle (String(Array.ofList link))
-      yield DirectLink(parseChars [] body |> List.ofSeq, info)
-      yield! parseChars [] rest
+
   | IndirectLink(body, link, original, rest) ->
       yield! accLiterals.Value
       let key = if String.IsNullOrEmpty(link) then String(body |> Array.ofSeq) else link
@@ -346,6 +353,14 @@ let (|PipeTableBlock|_|) input =
   | _ -> None
 
 
+/// Recognizes a fenced code block - {code:lang} ... {code}
+let (|FencedCodeBlock|_|) = function
+  | String.StartsWithWrapped("{code:","}") (lang, ignored) :: lines ->
+      let code, rest = lines |> List.partitionUntil (fun l -> l.StartsWith "{code}")
+      Some (code, rest |> List.skip 1, lang, ignored)
+  | _ -> None
+
+
 /// Defines a context for the main `parseParagraphs` function
 type ParsingContext =
   { Links : Dictionary<string, string * option<string>>
@@ -354,6 +369,9 @@ type ParsingContext =
 /// Parse a list of lines into a sequence of markdown paragraphs
 let rec parseParagraphsWiki (ctx:ParsingContext) (lines: string list) = seq {
   match lines with    
+  | FencedCodeBlock(code, Lines.TrimBlankStart lines, langString, ignoredLine) ->
+      yield CodeBlock(code |> String.concat ctx.Newline, langString, ignoredLine)
+      yield! parseParagraphsWiki ctx lines
   | PipeTableBlock((headers, rows), Lines.TrimBlankStart rest) ->
       let headParagraphs =
         if headers.IsNone then None

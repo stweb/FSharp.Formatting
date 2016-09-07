@@ -3,6 +3,7 @@
 open FsUnit
 open NUnit.Framework
 open FSharp.Markdown
+open System.IO
 
 let properNewLines (text: string) = text.Replace("\r\n", System.Environment.NewLine)
 
@@ -15,6 +16,27 @@ let ``Transform header 1 correctly``() =
     let expected = "<h1>Header 1</h1>\r\n" |> properNewLines
     WikiMarkup.TransformHtml doc
     |> shouldEqual expected
+
+[<Test>]
+let ``Transform link correctly``() =
+    let doc = "Click [http://github.com/]\r\n";
+    let expected = "<p>Click <a href=\"http://github.com/\">http://github.com/</a></p>\r\n" |> properNewLines
+    WikiMarkup.TransformHtml doc
+    |> shouldEqual expected
+
+[<Test>]
+let ``Transform link with body correctly``() =
+    let doc = "Click [http://github.com/|GitHub]\r\n";
+    let expected = "<p>Click <a href=\"http://github.com/\">GitHub</a></p>\r\n" |> properNewLines
+    WikiMarkup.TransformHtml doc
+    |> shouldEqual expected
+
+[<Test>]
+let ``Transform file correctly``() =
+    let file = """c:\Dev\dr\wiki\API\PHP Cart API.txt"""
+    let htm = file |> File.ReadAllText |> WikiMarkup.TransformHtml        
+    File.WriteAllText(Path.ChangeExtension  (file, ".htm"),  "<html><body>" + htm + "</body></html>")
+
 
 [<Test>]
 let ``Transform sample correctly``() =
