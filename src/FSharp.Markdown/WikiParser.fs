@@ -36,22 +36,24 @@ let (|WikiLink|_|) = function
             Some(arr.[0], arr.[1], rest)
   | _ -> None
 
+
 /// Matches a list if it starts with a sub-list that is delimited
 /// using the specified delimiters. Returns a wrapped list and the rest.
 ///
 /// This is similar to `List.Delimited`, but it skips over escaped characters.
 let (|DelimitedMarkdown|_|) bracket input =
-  let startl, endl = bracket, bracket
+
   // Like List.partitionUntilEquals, but skip over escaped characters
   let rec loop acc = function
-    | EscapedChar(x, xs) -> loop (x::'\\'::acc) xs
-    | input when List.startsWith endl input -> Some(List.rev acc, input)
+    | EscapedChar(x, xs) -> loop (x::'\\'::acc) xs //
+    | [bracket] -> Some(List.rev acc, [])
+    | bracket :: ' ' :: input -> Some(List.rev acc, input)
     | x::xs -> loop (x::acc) xs
     | [] -> None
   // If it starts with 'startl', let's search for 'endl'
   if List.startsWith bracket input then
     match loop [] (List.skip bracket.Length input) with
-    | Some(pre, post) -> Some(pre, List.skip bracket.Length post)
+    | Some(pre, post) -> Some(pre, post)
     | None -> None
   else None
 
